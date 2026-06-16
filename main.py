@@ -1,3 +1,5 @@
+from email.policy import default
+
 from fastapi import FastAPI,Path ,HTTPException,Query
 import json, logging
 from typing import Annotated,Literal,Optional
@@ -36,16 +38,25 @@ def about():
 def view():
     logger.info("View endpoint was hit")
     data = load_data()
-
-    return data
+    active_patients=[]
+    for patient in data.values():
+        if patient.get(("is_active") ,True):
+            active_patients.append(patient)
+    
+    return active_patients
 
 @app.get("/patient/{patient_id}")
 def view_patient(patient_id : str= Path(..., description = 'ID of the patient', example = 'P001')):
     logger.info("Patient ID was fetched")
     data=load_data()
-    if patient_id in data:
+    if patient_id not in data or data[patient_id].get("is_active" , True)== False :
+         raise HTTPException(status_code=404, detail="patient not found")
+    else :
         return data[patient_id]
-    raise HTTPException(status_code=404, detail="patient not found")
+    
+    """ if patient_id in data:
+        return data[patient_id]
+    raise HTTPException(status_code=404, detail="patient not found")  """
 
 @app.get("/sort")
 def sort_patients(sort_by : str= Query(...,description='Sort on the basis of height,weight,bmi'),order: str=Query('asc',description='sort in asc or desc order')):
@@ -59,11 +70,16 @@ def sort_patients(sort_by : str= Query(...,description='Sort on the basis of hei
     if order not in ['asc','desc']:
         raise HTTPException(status_code=400,detail="Invalid order, select from asc or desc")
     
-    data=load_data
+    data=load_data()
 
     sort_order=True if order=='desc' else False 
+    active_patients = [ ]
+    for patient in data.values():
+      if patient.get("is_active" , True) :
+        active_patients.append(patient)
+    
 
-    sorted_data= sorted(data.values(),key=lambda x:x.get(sort_by,0),reverse=sort_order)
+    sorted_data= sorted(active_patients,key=lambda x:x.get(sort_by,0),reverse=sort_order)
 
     return sorted_data
 
@@ -77,6 +93,7 @@ class Patient(BaseModel):
     gender : Annotated[Literal['male','female'], Field(...)]
     height : Annotated[float, Field(...,gt=0,description='In meters')] 
     weight : Annotated[float, Field(...,gt=0,description='In kgs')]
+    is_active : Annotated[bool,Field(default=True ,description="either True or False")]
 
     @computed_field
     @property
@@ -113,6 +130,7 @@ class PatientUpdate(BaseModel):
          gender : Annotated[Optional[Literal['male','female']], Field(default=None)]
          height : Annotated[Optional[float], Field(default=None,gt=0)] 
          weight : Annotated[Optional[float], Field(default=None,gt=0)]
+         is_active : Annotated[Optional[bool], Field(default=None)]
     
 @app.put("/edit/{patient_id}")
 def update_patient(patient_id:str,patient_update:PatientUpdate):   #patient_update needs to be converted to dictionary
@@ -120,7 +138,7 @@ def update_patient(patient_id:str,patient_update:PatientUpdate):   #patient_upda
     
     data=load_data()
 
-    if patient_id not in data:
+    if patient_id not in data or data[patient_id].get("is_active",True) == False:
         raise HTTPException(status_code=404,detail='Patient not found')
     
     existing_patient_info = data[patient_id]
@@ -150,7 +168,8 @@ def delete_patient(patient_id:str):
     if patient_id not in data:
         raise HTTPException(status_code=404,detail='Patient not found')
     
-    del data[patient_id]
+    data[patient_id]["is_active"] = False
+    #del data[patient_id]
 
     save_data(data)
 
